@@ -1,0 +1,168 @@
+---
+title: "Data Report"
+author: "Ethan Weiland"
+date: "2024-03-07"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+rm(list=ls())
+library(tidyverse)
+library(stargazer)
+library(gridExtra)
+load("rotten_tomatoes.RData")
+```
+
+## Introduction
+
+The contemporary United States is experiencing historically low levels of trust. Surveys show that Americans do not trust newspapers, universities, the Supreme Court, and other key institutions in society. This analysis studies this anti-establishment zeitgeist in the cultural sphere. Specifically, I look at the opinions of the general public and elite critics on a key cultural good: movies. Using data from Rotten Tomatoes, two research questions are posited:
+
+1. What is the association between critic score and public opinion for films in the 21st century?
+2. Has the association between critic score and public opinion for films changed over the course of the 21st century?
+
+## Data
+
+```{r, include=FALSE}
+n <- nrow(rotten_tomatoes)
+```
+
+The data for this analysis comes from the popular website Rotten Tomatoes. Rotten Tomatoes contains information on a plethora of movies, and for each movie it reports a “Tomatometer” (average critic score) and an “Audience Score” (average audience score). Additionally, Rotten Tomatoes contains information on other movie characteristics like release date, box office gross, run time, etc. A Kaggle user scraped Rotten Tomatoes and made the data freely available at the following link: https://www.kaggle.com/datasets/andrezaza/clapper-massive-rotten-tomatoes-movies-and-reviews/. This repository contains two tables used for this analysis: a first table of information on 140,000 movies and a second table of information on 1,400,000 individual critic reviews of these movies. 
+
+The dependent variable of interest is public opinion. Public opinion is operationalized as “Audience Score” for each movie, which is an aggregated score of individual user ratings of a movie on Rotten Tomatoes. Movies without an audience score were dropped. 
+
+The first independent variable of interest is critic score. Each movie contains an associated “TomatoMeter”, which is an aggregate of the critic scores. However, the definition of “critics” used in the TomatoMeter is too broad, so this analysis instead calculates a modified TomatoMeter which only considers reviews from critics classified as “Top Critics”. Top Critics are critics that work for established and well-known publications (e.g., The New York Times), who best represents elite opinion.  To calculate this modified TomatoMeter using only Top Critics, the table of individual reviews was used. Each review was converted into a percentage. Numeric scores (e.g., “3/4”) were simply calculated arithmetically (e.g., “3/4” became 75%). Letter-grade scores were converted to percentages using a standard grading scale (e.g., “B+” became 87.5%). The scraping algorithm resulted in some uninterpretable scores (e.g., “2.1/2”), which were coded as missing. To avoid one critic’s review dominating a modified TomatoMeter score, only movies with at least two top critic scores were included. Then, for each film fitting this criterion, the critic scores were simply averaged.
+
+The second independent variable of interest is release date. Two potential dates are available from the Rotten Tomatoes data: the release date in theaters and the release date on streaming. The release date in theaters is chosen because films in theaters are more likely to be seen and reviewed by critics than films released straight to streaming (especially before the COVID pandemic). To fill in missing values on release dates, the Rotten Tomatoes data was supplemented with data from The Movie DataBase (TMDB). A Kaggle user posts the complete dataset from TMDB daily, which is freely available at the following link (https://www.kaggle.com/datasets/asaniczka/tmdb-movies-dataset-2023-930k-movies). If a film had a valid release date from the Rotten Tomatoes data, this value was used. If a film had a missing release date from the Rotten Tomatoes data, and a non-missing release date from the TMDB data, the latter value was used. The films that still had a missing value on release date were dropped. Finally, due to the scope of the research question, any film released before 2000 was dropped. 
+
+Various control variables are included. The box office variable refers to the monetary success of the movie in millions of dollars. Due to missing data, this variable was also supplemented with data from TMDB in the same manner as the release date variable. Language refers to the original language of the film. Language is a factor variable with two levels: "English" and "Non-English". Run time refers to the length of the film (in minutes). Review count refers to the number of Top Critic reviews for each film. As described above, the minimum review count value is 2. After cleaning the data and removing films without a valid critic score, audience score, or release date, the final sample size is `r n`.
+
+## Descriptive Statistics
+
+Table 1 reports the descriptive statistics (mean, median, standard deviation, and percent missing) of audience score, critic score, release date, box office, language, run time, and review count. 
+
+```{r, echo=FALSE, results="asis"}
+percent_missing <- function(x) { # function to calculate the % of a vector that is NA
+  output <- sum(is.na(x)) / length(x)
+  output <- output * 100
+  return(output)
+}
+
+table1 <- data.frame(Mean = c(mean(rotten_tomatoes$audience_score, na.rm=T),
+                              mean(rotten_tomatoes$critic_score, na.rm=T),
+                              mean(rotten_tomatoes$release_date, na.rm=T),
+                              mean(rotten_tomatoes$box_office, na.rm=T),
+                              sum(rotten_tomatoes$language=="English", na.rm=T) / sum(!is.na(rotten_tomatoes$language)),
+                              mean(rotten_tomatoes$runtime, na.rm=T),
+                              mean(rotten_tomatoes$review_count, na.rm=T)),
+                     Median = c(median(rotten_tomatoes$audience_score, na.rm=T),
+                                median(rotten_tomatoes$critic_score, na.rm=T),
+                                median(rotten_tomatoes$release_date, na.rm=T),
+                                median(rotten_tomatoes$box_office, na.rm=T),
+                                NA,
+                                median(rotten_tomatoes$runtime, na.rm=T),
+                                median(rotten_tomatoes$review_count, na.rm=T)),
+                     SD = c(sd(rotten_tomatoes$audience_score, na.rm=T),
+                            sd(rotten_tomatoes$critic_score, na.rm=T),
+                            NA,
+                            sd(rotten_tomatoes$box_office, na.rm=T),
+                            NA,
+                            sd(rotten_tomatoes$runtime, na.rm=T),
+                            sd(rotten_tomatoes$review_count, na.rm=T)),
+                     Percent_Missing = c(percent_missing(rotten_tomatoes$audience_score),
+                                         percent_missing(rotten_tomatoes$critic_score),
+                                         percent_missing(rotten_tomatoes$release_date),
+                                         percent_missing(rotten_tomatoes$box_office),
+                                         percent_missing(rotten_tomatoes$language),
+                                         percent_missing(rotten_tomatoes$runtime),
+                                         percent_missing(rotten_tomatoes$review_count)))
+rownames(table1) <- c("Audience Score",
+                      "Critic Score",
+                      "Release Date",
+                      "Box Office (Millions $)", 
+                      "Language (1=English)", 
+                      "Run Time (Minutes)", 
+                      "Review Count")
+stargazer(table1,
+          title=paste0("Descriptive Statistics (n = ", nrow(rotten_tomatoes), ")"),
+          summary=FALSE,
+          header=FALSE,
+          digits=2)
+```
+
+Figure 1 and Figure 2 below plot the univariate distributions of audience score and critic score, respectively. Both variables have slight non-Normal distributions with a left-skew. However, the skew is greater for audience score, evidence by its greater standard deviation (20.20 percentage points) compared to critic score (14.32 percentage points). Both variables are centered around 60%. The mean and median of critic score (62.08 percentage points, 63.53 percentage points) are both slightly higher than the mean and median of audience score (61.28 percentage points, 63.00 percentage points). 
+
+```{r, echo=FALSE}
+figure1 <- ggplot(rotten_tomatoes, aes(x=audience_score)) +
+  geom_histogram(bins=30, fill="#619CFF", color="black") +
+  labs(title="Figure 1. Histogram of Audience\nScores",
+       x="Audience Score (%)",
+       y="Count")
+
+figure2 <- ggplot(rotten_tomatoes, aes(x=critic_score)) +
+  geom_histogram(bins=30, fill="#F8766D", color='black') +
+  labs(title="Figure 2. Histogram of Critic\nScores",
+       x="Critic Score (%)",
+       y="Count")
+
+grid.arrange(figure1, figure2, ncol=2)
+
+```
+
+```{r, include=FALSE}
+score_correlations <- round(cor(rotten_tomatoes$critic_score, rotten_tomatoes$audience_score), 2)
+```
+
+Figure 3 displays the bivariate association between audience score and critic score across all release dates. In doing so, Figure 3 provides a preliminary answer to the first research question. The blue line is a LOESS smoother (a local regression), which is a tool to help assess patterns in scatter plots with many points. Overall, there is a moderate linear association between audience score and critic score. This is evidenced by the smoother tracing a linear pattern through the main cluster of points. The smoother is flat at low levels of critic score and high levels of critic score, but this is due to a sparsity of data points rather than the relationship between the two variables. It is possible that the relationship is cubic, rather than strictly linear, which will be tested in future analyses. The correlation between the two variables is `r score_correlations`.
+
+```{r, echo=FALSE}
+figure3 <- ggplot(rotten_tomatoes, aes(x=critic_score, y=audience_score)) +
+  geom_point(alpha=0.2) +
+  geom_smooth(method="loess", formula="y~x", se=F) +
+  labs(title="Figure 3. Audience Score vs. Critic Score",
+       y="Audience Score",
+       x="Critic Score")
+figure3
+```
+
+To begin answering the second research question, Figure 4 below plots the association between critic score and audience score in the 21st century, this time faceted out by five year time intervals. Again, LOESS smoothers are plotted (the blue lines) to assist in discerning patterns. The patterns from 2000 - 2019 are constant: a moderately linear relationship between critic score and audience score. The patterns in the lowest and highest audience scores differ, but again this is due to sparse data. However, the relationship for films from 2020 to present is different. There is still a linear relationship, but it is weaker. Correlations calculated for each time period confirm this (Table 2). From 2000-2019, the correlation between critic score and audience score is about 0.6. From 2020 to present, the correlation drops to 0.5. 
+
+```{r, echo=FALSE, results="asis"}
+rotten_tomatoes$period <- NA
+rotten_tomatoes$period <- ifelse(rotten_tomatoes$release_date >= "2000-01-01" & rotten_tomatoes$release_date <= "2004-12-31", "2000-2004", rotten_tomatoes$period)
+rotten_tomatoes$period <- ifelse(rotten_tomatoes$release_date >= "2005-01-01" & rotten_tomatoes$release_date <= "2009-12-31", "2005-2009", rotten_tomatoes$period)
+rotten_tomatoes$period <- ifelse(rotten_tomatoes$release_date >= "2010-01-01" & rotten_tomatoes$release_date <= "2014-12-31", "2010-2014", rotten_tomatoes$period)
+rotten_tomatoes$period <- ifelse(rotten_tomatoes$release_date >= "2015-01-01" & rotten_tomatoes$release_date <= "2019-12-31", "2015-2019", rotten_tomatoes$period)
+rotten_tomatoes$period <- ifelse(rotten_tomatoes$release_date >= "2020-01-01" & rotten_tomatoes$release_date <= max(rotten_tomatoes$release_date), "2020-Present", rotten_tomatoes$period)
+
+figure4 <- ggplot(rotten_tomatoes, aes(x=critic_score, y=audience_score)) +
+  geom_point(alpha=0.2) +
+  geom_smooth(method="loess", formula="y~x", se=F) +
+  facet_wrap(~period) +
+  labs(title="Figure 4. Audience Score vs. Critic Score Over Time",
+       y="Audience Score",
+       x="Critic Score") 
+figure4
+
+table2 <- data.frame(Period = c("2000-2004",
+                                "2005-2009",
+                                "2010-2014",
+                                "2015-2019",
+                                "2020-Present"),
+                     Correlation = c(cor(filter(rotten_tomatoes, period=="2000-2004")$audience_score, filter(rotten_tomatoes, period=="2000-2004")$critic_score),
+                                     cor(filter(rotten_tomatoes, period=="2005-2009")$audience_score, filter(rotten_tomatoes, period=="2005-2009")$critic_score),
+                                     cor(filter(rotten_tomatoes, period=="2000-2004")$audience_score, filter(rotten_tomatoes, period=="2000-2004")$critic_score),
+                                     cor(filter(rotten_tomatoes, period=="2010-2014")$audience_score, filter(rotten_tomatoes, period=="2010-2014")$critic_score),
+                                     cor(filter(rotten_tomatoes, period=="2015-2019")$audience_score, filter(rotten_tomatoes, period=="2015-2019")$critic_score)))
+stargazer(table2,
+          title="Correlations Between Audience Score and Critic Score in Different Time Periods",
+          summary=FALSE,
+          header=FALSE,
+          digits=2)
+```
+
+## GitHub Link
+
+https://github.com/ethanphilipweiland/rotten-tomatoes
