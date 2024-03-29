@@ -1,0 +1,265 @@
+---
+title: "Analysis"
+author: "Ethan Weiland"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo=FALSE}
+rm(list=ls())
+library(tidyverse)
+library(lme4)
+library(lmerTest)
+load("rotten_tomatoes.RData")
+```
+
+## Research Questions
+
+1. What is the association between critic opinion and public opinion for films?
+2. Has the association between critic opinion and public opinion for films changed over time?
+3. Did the association between critic opinion and public opinion for films change due to the COVID-19 pandemic?
+
+## 1. What is the association between critic opinion and public opinion for films? 
+
+```{r}
+ggplot(data=rotten_tomatoes, aes(x=critic_score, y=audienceScore)) +
+  geom_point() +
+  geom_smooth(method="loess", se=F, formula="y~x") +
+  labs(title="Audience Score vs. Critic Score (Continuous)",
+       y="Audience Score",
+       x="Critic Score (% of Positive Critic Reviews)")
+
+cor(rotten_tomatoes$audienceScore, rotten_tomatoes$critic_score)
+```
+
+```{r}
+rotten_tomatoes$reviewState <- ifelse(rotten_tomatoes$critic_score >= 60, "Fresh", "Rotten")
+ggplot(rotten_tomatoes, aes(x=reviewState, y=audienceScore)) +
+  geom_boxplot() +
+  labs(title="Audience Score vs. Critic Score (Discrete)",
+       y="Audience Score",
+       x="Critic Score (>=60% Positive Reviews = Fresh)")
+
+rotten_tomatoes %>%
+  group_by(reviewState) %>%
+  summarize(Mean = mean(audienceScore),
+            "Standard Deviation" = sqrt(var(audienceScore)))
+
+t.test(filter(rotten_tomatoes, reviewState=="Fresh")$audienceScore, filter(rotten_tomatoes, reviewState=="Rotten")$audienceScore)
+```
+
+```{r}
+model1 <- lm(audienceScore ~
+               scale(critic_score) +
+               runtimeMinutes +
+               I(runtimeMinutes^2) +
+               originalLanguage +
+               review_count +
+               Documentary +
+               Horror +
+               Musical +
+               War +
+               critic_score:Documentary,
+             data=rotten_tomatoes)
+summary(model1)
+```
+
+## 2. Has the association between critic opinion and public opinion for films changed over time?
+
+```{r}
+rotten_tomatoes <- rotten_tomatoes %>%
+  mutate(decade = case_when(
+    releaseDateTheaters >= 2020 ~ "2020s",
+    releaseDateTheaters >= 2010 & releaseDateTheaters < 2020 ~ "2010s",
+    releaseDateTheaters >= 2000 & releaseDateTheaters < 2010 ~ "2000s",
+    releaseDateTheaters >= 1990 & releaseDateTheaters < 2000 ~ "1990s",
+    .default = "Pre 1990s"
+  )) %>%
+  mutate(decade = factor(decade, levels=c("Pre 1990s",
+                                          "1990s",
+                                          "2000s",
+                                          "2010s",
+                                          "2020s")))
+
+rotten_tomatoes %>%
+  filter(decade != "2020s") %>%
+  ggplot(aes(x=critic_score, y=audienceScore)) +
+  geom_point() +
+  facet_wrap(~decade) +
+  geom_smooth(method="loess", se=F, formula="y~x") +
+  labs(title="Audience Score vs. Critic Score by Decade",
+       y="Audience Score",
+       x="Critic Score")
+```
+
+```{r}
+rotten_tomatoes %>%
+  mutate(period = case_when(
+    releaseDateTheaters >= 2020 ~ "2020s",
+    releaseDateTheaters >= 2015 & releaseDateTheaters < 2020 ~ "2015 - 2019",
+    releaseDateTheaters >= 2010 & releaseDateTheaters < 2015 ~ "2010 - 2014",
+    releaseDateTheaters >= 2005 & releaseDateTheaters < 2010 ~ "2005 - 2009",
+    releaseDateTheaters >= 2000 & releaseDateTheaters < 2005 ~ "2000 - 2004",
+    releaseDateTheaters >= 1995 & releaseDateTheaters < 2000 ~ "1995 - 1999",
+    releaseDateTheaters >= 1990 & releaseDateTheaters < 1995 ~ "1990 - 1994",
+    .default="Pre 1990"
+  )) %>%
+  mutate(period = factor(period, levels=c("Pre 1990",
+                                          "1990 - 1994",
+                                          "1995 - 1999",
+                                          "2000 - 2004",
+                                          "2005 - 2009",
+                                          "2010 - 2014",
+                                          "2015 - 2019",
+                                          "2020s"))) %>%
+  filter(period != "2020s") %>%
+  ggplot(aes(x=critic_score, y=audienceScore)) +
+  geom_point() +
+  facet_wrap(~period) +
+  geom_smooth(method="loess", formula="y~x", se=F) +
+  labs(title="Audience Score vs. Critic Score by Five-Year Period",
+       x="Critic Score",
+       y="Audience Score")
+```
+
+```{r}
+model2 <- lm(audienceScore ~
+               scale(critic_score) +
+               runtimeMinutes +
+               I(runtimeMinutes^2) +
+               originalLanguage +
+               review_count +
+               Documentary +
+               Horror +
+               Musical +
+               War +
+               scale(critic_score):Documentary +
+               relevel(decade, ref="2010s") +
+               scale(critic_score):relevel(decade, ref="2010s"),
+             data=filter(rotten_tomatoes, decade != "2020s"))
+summary(model2)
+
+model2_null <- lm(audienceScore ~
+                    scale(critic_score) +
+                    runtimeMinutes +
+                    I(runtimeMinutes^2) +
+                    originalLanguage +
+                    review_count +
+                    Documentary +
+                    Horror +
+                    Musical +
+                    War +
+                    scale(critic_score):Documentary +
+                    relevel(decade, ref="2010s"),
+                  data=filter(rotten_tomatoes, decade != "2020s"))
+summary(model2_null)
+
+anova(model2, model2_null)
+```
+
+# 3. Did the association between critic opinion and public opinion for films change due to the COVID-19 pandemic?
+
+```{r}
+rotten_tomatoes$COVID <- factor(ifelse(rotten_tomatoes$releaseDateTheaters < 2020, "Pre 2020", "2020s"), levels=c("Pre 2020", "2020s"))
+ggplot(rotten_tomatoes, aes(x=critic_score, y=audienceScore)) +
+  geom_point() +
+  facet_wrap(~COVID) +
+  geom_smooth(method="loess", se=F, formula="y~x") +
+  labs(title="Association Between Critic Score and Audience Score Before/After\nCOVID Pandemic",
+       x="Critic Score",
+       y="Audience Score")
+
+ggplot(rotten_tomatoes, aes(x=critic_score, audienceScore)) +
+  geom_point() +
+  facet_wrap(~decade) +
+  geom_smooth(method="loess", se=F, formula="y~x") +
+  labs(title="Association Between Critic Score and Audience Score By Decade\nIncluding 2020s",
+       x="Critic Score",
+       y="Audience Score")
+```
+
+```{r}
+model3 <- lm(audienceScore ~
+               scale(critic_score) +
+               runtimeMinutes +
+               I(runtimeMinutes^2) +
+               originalLanguage +
+               review_count +
+               Documentary +
+               Horror +
+               Musical +
+               War +
+               scale(critic_score):Documentary +
+               relevel(decade, ref="2020s") +
+               scale(critic_score):relevel(decade, ref="2020s"),
+             data=rotten_tomatoes)
+summary(model3)
+
+
+model3_null <- lm(audienceScore ~
+                    scale(critic_score) +
+                    runtimeMinutes +
+                    I(runtimeMinutes^2) +
+                    originalLanguage +
+                    review_count +
+                    Documentary +
+                    Horror +
+                    Musical +
+                    War +
+                    scale(critic_score):Documentary +
+                    relevel(decade, ref = "2020s"),
+                  data = rotten_tomatoes)
+
+anova(model3_null, model3)
+```
+
+## Appendix
+
+```{r}
+data <- data.frame(fitted=fitted.values(model1),
+                   residuals=residuals(model1),
+                   residuals_sq=residuals(model1)^2)
+ggplot(data, aes(x=fitted, y=residuals)) +
+  geom_point(alpha=0.3) +
+  geom_smooth(method="loess", formula="y~x", se=F) +
+  labs(title="Model 1 Residual Plot",
+       x="Fitted Values",
+       y="Residuals")
+
+ggplot(data, aes(x=fitted, y=residuals_sq)) +
+  geom_point(alpha=0.3) +
+  geom_smooth(method="loess", formula="y~x", se=F) +
+  labs(title="Model 1 Squared Residual Plot",
+       x="Fitted Values",
+       y="Squared Residuals")
+
+qqnorm(residuals(model1), main="Model 1 Residual Normality Check")
+qqline(residuals(model1))
+```
+
+```{r}
+data <- data.frame(fitted=fitted.values(model3),
+                   residuals=residuals(model3),
+                   residuals_sq=residuals(model3)^2)
+ggplot(data, aes(x=fitted, y=residuals)) +
+  geom_point(alpha=0.3) +
+  geom_smooth(method="loess", formula="y~x", se=F) +
+  labs(title="Model 3 Residual Plot",
+       x="Fitted Values",
+       y="Residuals")
+
+ggplot(data, aes(x=fitted, y=residuals_sq)) +
+  geom_point(alpha=0.3) +
+  geom_smooth(method="loess", formula="y~x", se=F) +
+  labs(title="Model 3 Squared Residual Plot",
+       x="Fitted Values",
+       y="Squared Residuals")
+
+qqnorm(residuals(model3), main="Model 3 Residual Normality Check")
+qqline(residuals(model3))
+```
+
