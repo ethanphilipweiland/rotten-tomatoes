@@ -14,6 +14,7 @@ rm(list=ls())
 library(tidyverse)
 library(lme4)
 library(lmerTest)
+library(gridExtra)
 load("rotten_tomatoes.RData")
 ```
 
@@ -161,30 +162,65 @@ summary(model2_null)
 anova(model2, model2_null)
 ```
 
+```{r}
+distribution_1990s <- ggplot(data=filter(rotten_tomatoes, decade=="1990s"), aes(x=audienceScore)) +
+  geom_density() +
+  labs(title="Distribution of Audience Scores for Films in the 1990s",
+       x="Audience Scores",
+       y="Density")
+
+distribution_2010s <- ggplot(data=filter(rotten_tomatoes, decade=="2010s"), aes(x=audienceScore)) +
+  geom_density() +
+  labs(title="Distribution of Audience Scores for Films in the 2010s",
+       x="Audience Scores",
+       y="Density")
+
+grid.arrange(distribution_1990s, distribution_2010s)
+
+rotten_tomatoes %>%
+  filter(decade == "1990s" | decade == "2010s") %>%
+  group_by(decade) %>%
+  summarise(avg_audience_score = mean(audienceScore),
+            avg_critic_score = mean(critic_score),
+            avg_runtimeMinutes = mean(runtimeMinutes, na.rm=T),
+            prop_English = sum(originalLanguage=="English", na.rm=T) / n(),
+            prop_Documentary = sum(Documentary, na.rm=T) / n(),
+            prop_Horror = sum(Horror, na.rm=T) / n(),
+            prop_Musical = sum(Musical, na.rm=T) / n(),
+            prop_War = sum(War, na.rm=T) / n()
+  ) %>%
+  t()
+```
+
 # 3. Did the association between critic opinion and public opinion for films change due to the COVID-19 pandemic?
 
 ```{r}
-rotten_tomatoes$COVID <- factor(ifelse(rotten_tomatoes$releaseDateTheaters < 2020, "Pre 2020", "2020s"), levels=c("Pre 2020", "2020s"))
-ggplot(rotten_tomatoes, aes(x=critic_score, y=audienceScore)) +
-  geom_point() +
-  facet_wrap(~COVID) +
-  geom_smooth(method="loess", se=F, formula="y~x") +
-  labs(title="Association Between Critic Score and Audience Score Before/After\nCOVID Pandemic",
-       x="Critic Score",
-       y="Audience Score")
+rotten_tomatoes_COVID <- rotten_tomatoes %>%
+  filter(releaseDateTheaters >= 2016 & releaseDateTheaters <= 2023) %>%
+  mutate(COVID = case_when(
+    releaseDateTheaters < 2020 ~ "2016-2019",
+    .default = "2020-2023"
+  ))
 
-ggplot(rotten_tomatoes, aes(x=critic_score, audienceScore)) +
+ggplot(data=rotten_tomatoes_COVID, aes(x=audienceScore)) +
+  geom_density() +
+  facet_wrap(~COVID) +
+  labs(title="Distribution of Audience Scores Before/After the COVID-19 Pandemic",
+       x="Audience Scores",
+       y="Density") 
+
+ggplot(data=rotten_tomatoes_COVID, aes(y=audienceScore, x=critic_score)) +
   geom_point() +
-  facet_wrap(~decade) +
-  geom_smooth(method="loess", se=F, formula="y~x") +
-  labs(title="Association Between Critic Score and Audience Score By Decade\nIncluding 2020s",
-       x="Critic Score",
-       y="Audience Score")
+  geom_smooth(method="loess", formula="y~x", se=F) +
+  facet_wrap(~COVID) +
+  labs(title="Audience Score vs. Critic Score Before/After COVID-19 Pandemic",
+       y="Audience Score",
+       x="Critic Score")
 ```
 
 ```{r}
 model3 <- lm(audienceScore ~
-               scale(critic_score) +
+               critic_score +
                runtimeMinutes +
                I(runtimeMinutes^2) +
                originalLanguage +
@@ -193,28 +229,26 @@ model3 <- lm(audienceScore ~
                Horror +
                Musical +
                War +
-               scale(critic_score):Documentary +
-               relevel(decade, ref="2020s") +
-               scale(critic_score):relevel(decade, ref="2020s"),
-             data=rotten_tomatoes)
+               critic_score:Documentary +
+               COVID +
+               critic_score:COVID,
+             data=rotten_tomatoes_COVID)
 summary(model3)
 
-
 model3_null <- lm(audienceScore ~
-                    scale(critic_score) +
+                    critic_score +
                     runtimeMinutes +
-                    I(runtimeMinutes^2) +
+                    I(runtimeMinutes ^ 2) +
                     originalLanguage +
                     review_count +
                     Documentary +
                     Horror +
                     Musical +
                     War +
-                    scale(critic_score):Documentary +
-                    relevel(decade, ref = "2020s"),
-                  data = rotten_tomatoes)
+                    critic_score:Documentary,
+                  data = rotten_tomatoes_COVID)
 
-anova(model3_null, model3)
+anova(model3, model3_null)
 ```
 
 ## Appendix
