@@ -1,0 +1,457 @@
+---
+title: "The Golden Age of Critics? Examining the Association Between Critic Scores and Audience Scores Over Time on Rotten Tomatoes"
+author: "Ethan Weiland"
+date: '2024-04-23'
+format: beamer
+editor: visual
+---
+
+```{r, include=FALSE}
+rm(list=ls()) # clearing environment
+
+# Packages
+library(tidyverse)
+library(stargazer)
+library(broom)
+
+load("rotten_tomatoes.RData") # reading in data
+```
+
+## Background
+
+-   American society is experiencing low levels of trust and an anti-establishment mood
+
+-   Movies as a key cultural good
+
+-   Is this distrust reflected in a divergence in opinion on films between the general public and critics?
+
+## Research Questions
+
+1.  What is the historical association between critic opinion and public opinion for films?
+
+2.  Has the association between critic opinion and public opinion for films changed over time, especially during the 21st century?
+
+## Data
+
+```{r, include=FALSE}
+n <- nrow(rotten_tomatoes)
+```
+
+-   Rotten Tomatoes
+
+    -   Popular movie review website that contains a "TomatoMeter" (aggregated critic score) and "Audience Score" (aggregated audience score) for thousands of films
+
+    -   Also contains information on other movie characteristics like release year, genre, etc.
+
+-   A Kaggle user scraped Rotten Tomatoes and made the data available at <https://www.kaggle.com/datasets/andrezaza/clapper-massive-rotten-tomatoes-movies-and-reviews>
+
+    -   Table #1: Information on individual movies
+
+    -   Table #2: Information on critic reviews for these movies
+
+-   n = `r n` movies
+
+## Variables
+
+-   Dependent Variable
+
+    -   Audience Score = % of users on Rotten Tomatoes that rated a movie favorably
+
+-   Independent Variables
+
+    -   Critic Score = % of critics that reviewed a movie favorably
+
+        -   Restricted to critics defined as "Top Critics" by Rotten Tomatoes (work for established institutions like the New York Times, Indy Star, etc.)
+
+        -   Only films with [\>]{.underline} 5 "Top Critic" reviews included
+
+    -   Release Date = decade movie was released in theaters
+
+        -   Pre-1980, 1990s, 2000s, 2010s, 2020s
+
+## Control Variables
+
+```{r, include=FALSE}
+drama_count <- sum(rotten_tomatoes$primarygenre=="Drama")
+```
+
+-   Run time (in minutes)
+
+-   Review Count
+
+-   Original Language ("English" or "Non-English")
+
+-   Genre
+
+    -   18 possible categories
+
+    -   "Drama" modal category (`r drama_count` movies)
+
+-   Missing data were imputed using a bagging decision tree using the `caret` package in R
+
+```{r, include=FALSE}
+# function to calculate mean, sd, min, and max of continuous variables in data
+descriptives_function <- function(variable) { 
+  variable <- rotten_tomatoes[[variable]]
+  mean <- mean(variable)
+  sd <- sd(variable)
+  min <- min(variable)
+  max <- max(variable)
+  output <- c(mean, sd, min, max)
+  return(output)
+}
+
+table <- descriptives_function("audienceScore") 
+table <- rbind(table, descriptives_function("critic_score")) 
+
+for (i in c("Pre-1980",
+            "1980s",
+            "1990s",
+            "2000s",
+            "2010s",
+            "2020s")) {
+  table <- rbind(table, c(sum(rotten_tomatoes$decade == i) / nrow(rotten_tomatoes),
+      NA,
+      0,
+      1
+    ))
+}
+
+table <- rbind(table, descriptives_function("runtimeMinutes"))
+table <- rbind(table, descriptives_function("review_count"))
+
+table <- rbind(table, c(sum(rotten_tomatoes$originalLanguage=="English")/nrow(rotten_tomatoes),
+                        NA,
+                        0,
+                        1))
+
+for (i in levels(rotten_tomatoes$primarygenre)) { # for each of the genre factor levels
+  table <- rbind(table, c(sum(rotten_tomatoes$primarygenre==as.character(i))/nrow(rotten_tomatoes),
+                          NA,
+                          0,
+                          1))
+}
+
+colnames(table) <- c("Mean/Proportion", "StdDev", "Min.", "Max.")
+rownames(table) <- c("Audience Score",
+                     "Critic Score",
+                     "Pre-1980",
+                     "1980s",
+                     "1990s",
+                     "2000s",
+                     "2010s",
+                     "2020s",
+                     "Runtime (minutes)",
+                     "Review Count",
+                     "Language (1=Non-English)",
+                     levels(rotten_tomatoes$primarygenre))
+
+stargazer(table,
+          type="latex",
+          summary=FALSE,
+          header=FALSE,
+          rownames=TRUE,
+          digits=2,
+          title=paste0("Descriptive Statistics, n=(",
+                       n,
+                       ")"),
+          notes=c("Source: Rotten Tomatoes"))
+
+# Ran into difficulty rendering onto slide, so rendered as PDF page and manually inserted into slide deck
+  # Important LATEX commands to format in PDF nicely:
+  # \vspace{-60pt}
+  # \pagenumbering{gobble}
+```
+
+## Distributions of Audience and Critic Scores
+
+```{r, echo=FALSE}
+rotten_tomatoes %>%
+  pivot_longer(cols=c(audienceScore,
+                      critic_score),
+               names_to="Source",
+               values_to="Score") %>%
+  ggplot(aes(x=Score, color=Source)) +
+  geom_density() +
+  labs(title="Figure 1. Distributions of Audience and Critic Scores",
+       x="Score (%)",
+       y="Density") +
+  scale_color_discrete(labels=c("Audience", "Critic"))
+  
+```
+
+## Audience Scores vs. Critic Scores
+
+```{r, echo=FALSE}
+ggplot(data=rotten_tomatoes, aes(x=critic_score, y=audienceScore)) +
+  geom_point(alpha=0.3) +
+  stat_smooth(formula="y~x", se=F, method="loess") +
+  labs(title="Figure 2. Audience Scores vs. Critic Scores Across All Years",
+       y="Audience Score",
+       x="Critic Score")
+cor <- round(cor(rotten_tomatoes$critic_score, rotten_tomatoes$audienceScore), 2)
+```
+
+$\rho$ = `r cor`
+
+```{r, include=FALSE}
+model1 <- lm(audienceScore ~ critic_score +
+               decade +
+               runtimeMinutes +
+               I(runtimeMinutes^2) +
+               review_count +
+               originalLanguage +
+               primarygenre,
+             data=rotten_tomatoes)
+
+stargazer(model1,
+          type="latex",
+          header=FALSE,
+          title="OLS Model for Audience Scores (Model 1)",
+          dep.var.labels=c("Audience Score"),
+          covariate.labels=c("Critic Score",
+                             levels(rotten_tomatoes$decade)[-1],
+                             "Runtime",
+                             "Runtime Squared",
+                             "Review Count",
+                             "Language (1=Non-English)",
+                             levels(rotten_tomatoes$primarygenre)[-1]),
+          digits=2,
+          font.size="tiny",
+          notes=c("Source: Rotten Tomatoes"))
+
+# Ran into difficulty rendering onto slide, so rendered as PDF page and manually inserted into slide deck
+  # Important LATEX commands to format in PDF nicely:
+  # \setcounter{table}{1}
+  # \vspace{-100pt}
+  # \pagenumbering{gobble}
+```
+
+## Critic Score's Impact
+
+```{r, include=FALSE}
+critic_score_coef <- tidy(model1) %>% 
+  filter(term=="critic_score") %>% 
+  select(estimate) %>% 
+  as.numeric()
+adjusted_r2 <- summary(model1)$adj.r.squared
+```
+
+-   The coefficient for critic score = `r critic_score_coef %>% round(3)`
+
+    -   A 10 point increase in critic score is associated with an `r (critic_score_coef*10) %>% round(2)` point increase in audience score
+
+    -   A one standard deviation increase in critic score is associated with an `r (critic_score_coef*sd(rotten_tomatoes$critic_score)) %>% round(2)` point increase in audience score
+
+-   The model explains a substantial portion of the variance in critic score (Adjusted R$^2$ = `r (adjusted_r2*100) %>% round(2)`)
+
+-   The residuals are homoscedastic and normal, and the residual plot is null (see Appendix)
+
+## Audience Scores vs. Critic Scores By Decade
+
+```{r, ECHO=FALSE}
+rotten_tomatoes$decade <- factor(rotten_tomatoes$decade, levels=c("Pre-1980", "1980s", "1990s", "2000s", "2010s", "2020s"))
+ggplot(rotten_tomatoes, aes(x=critic_score, y=audienceScore)) +
+  geom_point(alpha=0.3) +
+  geom_smooth(method="loess", formula="y~x", se=F) +
+  labs(title="Figure 3. Audience Scores vs. Critic Scores By Decade",
+       x="Critic Score",
+       y="Audience Score") +
+  facet_wrap(~decade)
+```
+
+## Audience Scores vs. Critic Scores By Decade
+
+\setcounter{table}{2}
+
+```{r, echo=FALSE, results="asis"}
+table <- rotten_tomatoes %>%
+  group_by(decade) %>%
+  summarize(mean(critic_score),
+            mean(audienceScore),
+            cor(audienceScore, critic_score))
+table <- data.frame(table)
+rownames(table) <- table[,1]
+table <- table[,-1]
+colnames(table) <- c("Mean Critic Score", "Mean Audience Score", "Correlation")
+
+stargazer(table,
+          type = "latex",
+          summary = FALSE,
+          header = FALSE,
+          rownames = TRUE,
+          digits = 2,
+          title = "Means and Correlations By Decade",
+          notes = c("Source: Rotten Tomatoes"))
+
+```
+
+## Critic Score's Impact by Decade
+
+```{r, include=FALSE}
+rotten_tomatoes$decade <- relevel(rotten_tomatoes$decade, ref="2010s")
+model2 <- lm(audienceScore ~ critic_score +
+               decade +
+               critic_score:decade +
+               runtimeMinutes +
+               I(runtimeMinutes^2) +
+               review_count +
+               originalLanguage +
+               primarygenre,
+             data=rotten_tomatoes)
+
+stargazer(model2,
+          type="latex",
+          header=FALSE,
+          title="OLS Model for Audience Score with Critic Score by Decade Interactions (Model 2)",
+          dep.var.labels=c("Audience Score"),
+          covariate.labels=c("Critic Score",
+                             levels(rotten_tomatoes$decade)[-1],
+                             "Runtime",
+                             "Runtime Squared",
+                             "Review Count",
+                             "Language (1=Non-English)",
+                             levels(rotten_tomatoes$primarygenre)[-1],
+                             "Critic Score*Pre-1980",
+                             "Critic Score*1980s",
+                             "Critic Score*1990s",
+                             "Critic Score*2000s",
+                             "Critic Score*2020s"),
+          digits=2,
+          font.size="tiny",
+          notes=c("Source: Rotten Tomatoes"))
+
+# Ran into difficulty rendering onto slide, so rendered as PDF page and manually inserted into slide deck
+  # Important LATEX commands to format in PDF nicely:
+  # \setcounter{table}{3}
+  # \vspace{-100pt}
+  # \pagenumbering{gobble}
+
+anova(model1, model2) # support for the critic_score by decade interactions
+critic_score_coef <- tidy(model2) %>%
+  filter(term=="critic_score") %>%
+  select(estimate) %>%
+  as.numeric()
+```
+
+-   An F-Test supports the model with the critic by decade interactions over the model without (p \< 0.001)
+
+-   The coefficient on critic score is still significant (`r round(critic_score_coef, 2)`, p \< 0.001)
+
+-   Two critic score by decade interactions are significant: [critic score\*2000s]{.underline} and [critic score\*2020s]{.underline}
+
+    -   The 2010s are the baseline category
+
+## Critic Score's Impact by Decade
+
+```{r, include=FALSE}
+interaction_2000s_coef <- tidy(model2) %>%
+  filter(term=="critic_score:decade2000s") %>%
+  select(estimate) %>%
+  as.numeric()
+
+interaction_2020s_coef <- tidy(model2) %>%
+  filter(term=="critic_score:decade2020s") %>%
+  select(estimate) %>%
+  as.numeric()
+```
+
+-   A one standard deviation increase in critic score is associated with a `r round(sd(rotten_tomatoes$critic_score)*critic_score_coef, 2)` point increase in audience score in the 2010s
+
+-   The coefficient for the critic score by 2000s interaction is `r round(interaction_2000s_coef, 3)`
+
+    -   The association between a one standard deviation increase in critic score and audience score is `r (sd(rotten_tomatoes$critic_score)*critic_score_coef + sd(rotten_tomatoes$critic_score)*interaction_2000s_coef) %>% round(2)` points in the 2000s
+
+    -   Statistically different, but not meaningfully different
+
+-   The coefficient for the critic score by 2020s interaction is `r round(interaction_2020s_coef, 3)`
+
+    -   The association between a one standard deviation increase in critic score and audience score is `r (sd(rotten_tomatoes$critic_score)*critic_score_coef + sd(rotten_tomatoes$critic_score)*interaction_2020s_coef) %>% round(2)` in the 2020s
+
+    -   Meaningfully different = this is \~[50%]{.underline} weaker
+
+## Pandemic Effect?
+
+```{r, echo=FALSE}
+COVID <- rotten_tomatoes %>%
+  filter(releaseDateTheaters >= 2016)
+COVID$pandemic_dummy <- ifelse(COVID$releaseDateTheaters < 2020, "2016-2019", "2020-Present")
+ggplot(COVID, aes(x=critic_score, y=audienceScore )) +
+  geom_point(alpha=0.3) +
+  labs(title="Figure 4. Audience Scores vs. Critic Scores Before/After 2020",
+       x="Critic Scores",
+       y="audience score") +
+  geom_smooth(method="loess", formula="y~x", se=F) +
+  facet_wrap(~pandemic_dummy)
+
+before_COVID_cor <- cor(filter(COVID, pandemic_dummy=="2016-2019")$audienceScore, 
+                        filter(COVID, pandemic_dummy=="2016-2019")$critic_score)
+after_COVID_cor <- cor(filter(COVID, pandemic_dummy=="2020-Present")$audienceScore, 
+                       filter(COVID, pandemic_dummy=="2020-Present")$critic_score)
+
+```
+
+$\rho_{2016-2019}$ = `r round(before_COVID_cor, 2)`; $\rho_{2020-Present}$ = `r round(after_COVID_cor, 2)`
+
+## Key Takeaways
+
+-   The opinions of critics and the general public on movies has a moderately strong linear relationship
+
+-   Until 2020, this relationship did not meaningfully change over time
+
+-   After 2020 the relationship between critic opinion and public opinion weakened
+
+    -   Future analysts should determine if this is reflective of a societal anti-establishment mood or changes in the film industry due to COVID (e.g., straight-to-streaming)
+
+## Thank You!
+
+<https://github.com/ethanphilipweiland/rotten-tomatoes>
+
+## Appendix
+
+```{r, echo=FALSE}
+rotten_tomatoes$critic_score_discrete <- ifelse(rotten_tomatoes$critic_score >= 60, "Fresh", "Rotten")
+ggplot(rotten_tomatoes, aes(x=critic_score_discrete, y=audienceScore)) +
+  geom_boxplot() +
+  labs(title="Figure A1. Audience Scores vs. (Discrete) Critic Scores",
+       y="Audience Score",
+       x="Critic Review Status (Fresh >= 60%)")
+```
+
+```{r, include=FALSE}
+t.test(filter(rotten_tomatoes, critic_score_discrete=="Fresh")$audienceScore, filter(rotten_tomatoes, critic_score_discrete=="Rotten")$audienceScore)
+```
+
+## Appendix
+
+```{r, echo=FALSE}
+ggplot(data.frame(residuals=residuals(model1),
+                  fitted=fitted.values(model1)),
+       aes(x=fitted, y=residuals)) +
+  geom_point(alpha=0.3) +
+  stat_smooth(method="loess", formula="y~x", se=F) +
+  labs(title="Figure A2. Model 1 Residuals vs. Fitted Values",
+       y="Residuals",
+       x="Fitted Values")
+```
+
+## Appendix
+
+```{r, echo=FALSE}
+ggplot(data.frame(residuals_sq=residuals(model1)^2,
+                  fitted=fitted.values(model1)),
+       aes(x=fitted, y=residuals_sq)) +
+  geom_point(alpha=0.3) +
+  stat_smooth(method="loess", formula="y~x", se=F) +
+  labs(title="Figure A3. Model 1 Residuals Squared vs. Fitted Values",
+       y="Residuals Squared",
+       x="Fitted Values")
+
+```
+
+## Appendix
+
+```{r, echo=FALSE}
+qqnorm(residuals(model1), main="Figure A4. Normality of Model 1 Residuals")
+qqline(residuals(model1))
+```
