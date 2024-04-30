@@ -1,0 +1,364 @@
+---
+title: "The Golden Age of Critics? Examining the Association Between Critic Scores and Audience Scores Over Time on Rotten Tomatoes"
+author: "Ethan Weiland"
+date: '2024-04-28'
+format: pdf
+editor: visual
+---
+
+```{r, include=FALSE}
+rm(list=ls()) # clearing environment
+
+# Packages
+library(tidyverse)
+library(stargazer)
+library(broom)
+
+load("rotten_tomatoes.RData") # reading in data
+```
+
+\pagenumbering{gobble}
+
+## Introduction
+
+The contemporary United States is experiencing historically low levels of trust. Surveys show that Americans do not trust newspapers, universities, the Supreme Court, and other key institutions in society. This analysis explores whether this distrust extends to the cultural sphere. Specifically, I look at the opinions of the general public and critics on a key cultural good: movies. Using data from Rotten Tomatoes, two research questions are asked:
+
+1.  What is the historical association between critic opinion and public opinion for films?
+2.  Has the association between critic opinion and public opinion for films changed over time, especially during the 21st century?
+
+## Data
+
+```{r, include=FALSE}
+n <- nrow(rotten_tomatoes)
+```
+
+The data for this analysis comes from the popular website Rotten Tomatoes. Rotten Tomatoes contains information on a plethora of movies, and for each movie it reports a "Tomatometer" (average critic score) and an "Audience Score" (average audience score). Additionally, Rotten Tomatoes contains information on other movie characteristics like release date, genre, run time, etc. A Kaggle user scraped Rotten Tomatoes and made the data available at the following link: <https://www.kaggle.com/datasets/andrezaza/clapper-massive-rotten-tomatoes-movies-and-reviews/>. This repository contains two tables used in this analysis: a first table on movies and a second table on individual critic reviews of these movies.
+
+The dependent variable of interest is public opinion. Public opinion is operationalized as "Audience Score" for each movie, which is the percentage of users on Rotten Tomatoes that rated a movie positively.
+
+The first independent variable of interest is critic score. A "TomatoMeter" measure is available for each movie, which is a measure of aggregate critic opinion ranging from 0% (wholly negative) to 100% (wholly positive). However, the definition of "critics" used in the available TomatoMeter is too broad. This analysis instead calculates a modified TomatoMeter that only includes reviews from critics classified as "Top Critics". Top Critics are critics that work for established and well-known publications (e.g., The New York Times, Indy Star, etc.), who best represent elite opinion. To calculate this modified TomatoMeter, the table of critic reviews was used. Each review is classified as "Fresh" (indicating a positive review) or "Rotten" (indicating a negative review). The critic score is equal to the percentage of "Fresh" reviews. To avoid one critic's review dominating, only movies with at least five Top Critic scores were included.
+
+The second independent variable of interest is release date. Two potential dates are available from the Rotten Tomatoes data: the release date in theaters and the release date on streaming. The release date in theaters is chosen because films in theaters are more likely to be seen and reviewed by critics than films released straight to streaming (especially before the COVID pandemic). Release date is an ordinal measure grouped by decade with the following levels: "Pre-1980", "1980s", "1990s", "2000s", "2010s", and "2020s". All films before 1980 had to be collapsed into one category due to sparse data. Unless otherwise specified, "2010s" is the baseline category.
+
+Various control variables are included. Genre is a nominal variable with `r length(unique(rotten_tomatoes$primarygenre))` categories (see Descriptive Statistics table for a full list). If a film had multiple genres listed, the first genre was used. Language is equal to to the original language of the film: "English" or "Non-English". Run time refers to the length of the film (in minutes). Review count refers to the number of Top Critic reviews for each film. As described above, the minimum review count value is 5.
+
+Missing data was imputed via bagging using the `caret` package in R. The dependent variable (audience score) was included in the imputation equations, but the imputed audience score values were not used. Films with a missing value on audience score were dropped. The final analytical sample size is `r n` films. Table 3 lists the means, standard deviations, minimums, and maximums for each variable just described.
+
+```{r, echo=FALSE, results="asis"}
+# function to calculate mean, sd, min, and max of continuous variables in data
+descriptives_function <- function(variable) { 
+  variable <- rotten_tomatoes[[variable]]
+  mean <- mean(variable)
+  sd <- sd(variable)
+  min <- min(variable)
+  max <- max(variable)
+  output <- c(mean, sd, min, max)
+  return(output)
+}
+
+table <- descriptives_function("audienceScore") 
+table <- rbind(table, descriptives_function("critic_score")) 
+
+for (i in c("Pre-1980",
+            "1980s",
+            "1990s",
+            "2000s",
+            "2010s",
+            "2020s")) {
+  table <- rbind(table, c(sum(rotten_tomatoes$decade == i) / nrow(rotten_tomatoes),
+      NA,
+      0,
+      1
+    ))
+}
+
+table <- rbind(table, descriptives_function("runtimeMinutes"))
+table <- rbind(table, descriptives_function("review_count"))
+
+table <- rbind(table, c(sum(rotten_tomatoes$originalLanguage=="English")/nrow(rotten_tomatoes),
+                        NA,
+                        0,
+                        1))
+
+for (i in levels(rotten_tomatoes$primarygenre)) { # for each of the genre factor levels
+  table <- rbind(table, c(sum(rotten_tomatoes$primarygenre==as.character(i))/nrow(rotten_tomatoes),
+                          NA,
+                          0,
+                          1))
+}
+
+colnames(table) <- c("Mean/Proportion", "StdDev", "Min.", "Max.")
+rownames(table) <- c("Audience Score",
+                     "Critic Score",
+                     "Pre-1980",
+                     "1980s",
+                     "1990s",
+                     "2000s",
+                     "2010s",
+                     "2020s",
+                     "Runtime (minutes)",
+                     "Review Count",
+                     "Language (1=Non-English)",
+                     levels(rotten_tomatoes$primarygenre))
+
+stargazer(table,
+          type="latex",
+          summary=FALSE,
+          header=FALSE,
+          rownames=TRUE,
+          digits=2,
+          title=paste0("Descriptive Statistics, n=(",
+                       n,
+                       ")"),
+          notes=c("Source: Rotten Tomatoes"))
+```
+
+## Analysis
+
+### Association Between Critic Opinion and Public Opinion
+
+```{r, echo=FALSE}
+rotten_tomatoes %>%
+  pivot_longer(cols=c(audienceScore,
+                      critic_score),
+               names_to="Source",
+               values_to="Score") %>%
+  ggplot(aes(x=Score, color=Source)) +
+  geom_density() +
+  labs(title="Figure 1. Distributions of Audience and Critic Scores",
+       x="Score (%)",
+       y="Density") +
+  scale_color_discrete(labels=c("Audience", "Critic"))
+```
+
+```{r, include=FALSE}
+t.test(rotten_tomatoes$audienceScore, rotten_tomatoes$critic_score)
+```
+
+Figure 1 plots the univariate distributions of audience score and critic score. It is clear that critic scores have a greater spread than audience scores. Critic scores make use of the entire range of possible scores while audience scores are highest at around 70-80%. There are films with unanimous critic disapproval, while almost no films have unanimous audience disapproval. One possible explanation is a self-selection effect. Audience members won't voluntarily see a film they know they will dislike, but critics are tasked with seeing many films, regardless of their individual taste. The mean of audience score is `r round(mean(rotten_tomatoes$audienceScore), 2)` and the mean of critic score is `r round(mean(rotten_tomatoes$critic_score), 2)`. While a t-test concludes that these means are statistically different (t=5.8051, p \< 0.001), this is not much practical difference.
+
+```{r, echo=FALSE}
+ggplot(data=rotten_tomatoes, aes(x=critic_score, y=audienceScore)) +
+  geom_point(alpha=0.3) +
+  stat_smooth(formula="y~x", se=F, method="loess") +
+  labs(title="Figure 2. Audience Scores vs. Critic Scores Across All Years",
+       y="Audience Score",
+       x="Critic Score")
+cor <- round(cor(rotten_tomatoes$critic_score, rotten_tomatoes$audienceScore), 2)
+```
+
+To begin answering the first research question, Figure 2 plots audience score vs. critic score for all films. The blue line is a LOESS smoother, which is a kind of local regression that helps visualize patterns when a large number of points are plotted. The LOESS smoother is strikingly straight. In fact, when a linear regression line is plotted it is difficult to see because it is nearly identical with the LOESS line. The correlation between audience score and critic score is `r cor` . There is a moderately-strong positive linear relationship between audience score and critic score for all films.
+
+Next, audience score is modeled with critic score as the key independent variable. An ordinary least squares (OLS) model is used. OLS is appropriate because the dependent variable is a continuous measure and exploratory plotting revealed that the association between the two variables is linear. Further, OLS produces the best linear unbiased estimates. The model for audience score with critic score and other important control variables (Model 1) is formulated as follows:
+
+$$
+AudienceScore = \beta_0 + \beta_1CriticScore + \beta_{2-6}Decade + \beta_7Runtime + \beta_8Runtime^2 + \beta_9ReviewCount
+$$
+
+$$
++ \beta_{10}Language + \beta_{11-27}Genre + \epsilon_i
+$$
+
+*Where* $\epsilon_i$ \~ *N* (0, $\sigma^2$)
+
+The model includes a quadratic term for run time because it is theorized that there is a sweet spot for film length. Audiences like films as they get longer up until a certain point when they get bored. The model contains a large number of parameters due to the large number of levels on the decade and genre factor variables. Table 2 provides the results of this model.
+
+```{r, echo=FALSE, results="asis"}
+model1 <- lm(audienceScore ~ critic_score +
+               decade +
+               runtimeMinutes +
+               I(runtimeMinutes^2) +
+               review_count +
+               originalLanguage +
+               primarygenre,
+             data=rotten_tomatoes)
+
+stargazer(model1,
+          type="latex",
+          header=FALSE,
+          title="OLS Model for Audience Scores (Model 1)",
+          dep.var.labels=c("Audience Score"),
+          covariate.labels=c("Critic Score",
+                             levels(rotten_tomatoes$decade)[-1],
+                             "Runtime",
+                             "Runtime Squared",
+                             "Review Count",
+                             "Language (1=Non-English)",
+                             levels(rotten_tomatoes$primarygenre)[-1]),
+          digits=2,
+          single.row=TRUE,
+          star.cutoffs = c(0.05, 0.01, 0.001), 
+          notes=c("Source: Rotten Tomatoes"))
+
+critic_score_coef <- tidy(model1) %>% 
+  filter(term=="critic_score") %>% 
+  select(estimate) %>% 
+  as.numeric()
+adjusted_r2 <- summary(model1)$adj.r.squared
+```
+
+The model fits well. The residual plot is null and the residuals themselves are homoscedastic and Normal (see Appendix). The model explains a substantial portion of the variation in audience scores (Adjusted R$^2$ = `r (adjusted_r2*100) %>% round(2)`%). Both of these facts provide confidence that parameter estimates are accurate. The coefficient for critic score is `r round(critic_score_coef, 3)` (p \< 0.001). A 10 point increase in critic score is significantly associated with a `r round(critic_score_coef*10, 2)` increase in audience score conditional on other variables. Or, a one standard deviation increase in critic score is associated with a `r round(critic_score_coef*sd(rotten_tomatoes$critic_score), 2)` increase in audience score conditional on other variables.
+
+### Association Over Time
+
+The second research question is: Has the association between critic opinion and public opinion for films changed over time, especially during the 21st century? To do so, this analysis will reexamine the association between critic score and audience score in each decade (Pre 1980s, 1980s, 1990s, 2000s, 2010s, 2020s).
+
+```{r, echo=FALSE}
+rotten_tomatoes$decade <- factor(rotten_tomatoes$decade, levels=c("Pre-1980", "1980s", "1990s", "2000s", "2010s", "2020s"))
+ggplot(rotten_tomatoes, aes(x=critic_score, y=audienceScore)) +
+  geom_point(alpha=0.3) +
+  geom_smooth(method="loess", formula="y~x", se=F) +
+  labs(title="Figure 3. Audience Scores vs. Critic Scores By Decade",
+       x="Critic Score",
+       y="Audience Score") +
+  facet_wrap(~decade)
+```
+
+```{r, echo=FALSE, results="asis"}
+table <- rotten_tomatoes %>%
+  group_by(decade) %>%
+  summarize(mean(critic_score),
+            mean(audienceScore),
+            cor(audienceScore, critic_score))
+table <- data.frame(table)
+rownames(table) <- table[,1]
+table <- table[,-1]
+colnames(table) <- c("Mean Critic Score", "Mean Audience Score", "Correlation")
+
+stargazer(table,
+          type = "latex",
+          summary = FALSE,
+          header = FALSE,
+          rownames = TRUE,
+          digits = 2,
+          title = "Means and Correlations By Decade",
+          notes = c("Source: Rotten Tomatoes"))
+```
+
+Figure 3 plots audience score vs. critic score in each decade. The blue line is a LOESS smoother. Again the LOESS smoother is straight, indicating a linear association between critic score and audience score in each decade. Until 2020, the lines appear parallel which implies that the association between audience score and critic score does not vary by decade. However, in the 2020s the slope of the LOESS smoother is noticeably weaker. Table 3 lists the mean critic score, mean audience score, and correlation between these two quantities in each decade. Until 2020, the correlation varied between 0.5 and 0.65. However in the 2020s the correlation is noticeably smaller: 0.3.
+
+```{r, echo=FALSE, results="asis"}
+rotten_tomatoes$decade <- relevel(rotten_tomatoes$decade, ref="2010s")
+model2 <- lm(audienceScore ~ critic_score +
+               decade +
+               critic_score:decade +
+               runtimeMinutes +
+               I(runtimeMinutes^2) +
+               review_count +
+               originalLanguage +
+               primarygenre,
+             data=rotten_tomatoes)
+
+stargazer(model2,
+          type="latex",
+          header=FALSE,
+          title="OLS Model for Audience Score with Critic Score by Decade Interactions (Model 2)",
+          dep.var.labels=c("Audience Score"),
+          covariate.labels=c("Critic Score",
+                             levels(rotten_tomatoes$decade)[-1],
+                             "Runtime",
+                             "Runtime Squared",
+                             "Review Count",
+                             "Language (1=Non-English)",
+                             levels(rotten_tomatoes$primarygenre)[-1],
+                             "Critic Score*Pre-1980",
+                             "Critic Score*1980s",
+                             "Critic Score*1990s",
+                             "Critic Score*2000s",
+                             "Critic Score*2020s"),
+          star.cutoffs=c(0.05, 0.01, 0.001),
+          digits=2,
+          single.row=TRUE,
+          notes=c("Source: Rotten Tomatoes"))
+```
+
+```{r, include=FALSE}
+anova(model1, model2) # support for the critic_score by decade interactions
+critic_score_coef <- tidy(model2) %>%
+  filter(term=="critic_score") %>%
+  select(estimate) %>%
+  as.numeric()
+
+interaction_2000s_coef <- tidy(model2) %>%
+  filter(term=="critic_score:decade2000s") %>%
+  select(estimate) %>%
+  as.numeric()
+
+interaction_2020s_coef <- tidy(model2) %>%
+  filter(term=="critic_score:decade2020s") %>%
+  select(estimate) %>%
+  as.numeric()
+```
+
+To formally test whether the association between critic score and audience score varies by decade, interaction terms are added to the previous model. Table 4 presents the output of this new model (Model 2). An F-Test for testing multiple fixed effects (the interactions) supports the model with the critic score by decade interactions over the model without them (F=20.877, p \< 0.001). The new coefficient on critic score is `r round(critic_score_coef, 2)` (p \< 0.001). This effect is actually slightly larger than in the previous model. In the 2010s (the baseline category), a one standard deviation increase in critic score is significantly associated with a `r round(sd(rotten_tomatoes$critic_score)*critic_score_coef, 2)` increase in audience score, conditional on other factors.
+
+Two critic score by decade interactions are significant: critic score by 2000s (p \< 0.001) and critic score by 2020s (p \< 0.001). This means that the association between critic score and audience score is significantly different in these two decades compared to the association in the 2010s. The association between a one standard deviation increase in critic score and audience score in the 2000s is `r (sd(rotten_tomatoes$critic_score)*critic_score_coef + sd(rotten_tomatoes$critic_score)*interaction_2000s_coef) %>% round(2)`. While this may be statistically different, this is not meaningfully different from the association in the 2010s (it is less than a point). In the 2020s, the association between a one standard deviation in critic score and audience score is `r (sd(rotten_tomatoes$critic_score)*critic_score_coef + sd(rotten_tomatoes$critic_score)*interaction_2020s_coef) %>% round(2)`. Unlike the 2000s, this is statistically different *and* meaningfully different (\~ 50% weaker) than the baseline association in the 2010s. For the first time, the association between audience score and critic score is weakening.
+
+### Pandemic Effect?
+
+```{r, echo=FALSE}
+COVID <- rotten_tomatoes %>%
+  filter(releaseDateTheaters >= 2016)
+COVID$pandemic_dummy <- ifelse(COVID$releaseDateTheaters < 2020, "2016-2019", "2020-Present")
+ggplot(COVID, aes(x=critic_score, y=audienceScore )) +
+  geom_point(alpha=0.3) +
+  labs(title="Figure 4. Audience Scores vs. Critic Scores Before/After 2020",
+       x="Critic Score",
+       y="Audience Score") +
+  geom_smooth(method="loess", formula="y~x", se=F) +
+  facet_wrap(~pandemic_dummy)
+
+before_COVID_cor <- cor(filter(COVID, pandemic_dummy=="2016-2019")$audienceScore, 
+                        filter(COVID, pandemic_dummy=="2016-2019")$critic_score)
+after_COVID_cor <- cor(filter(COVID, pandemic_dummy=="2020-Present")$audienceScore, 
+                       filter(COVID, pandemic_dummy=="2020-Present")$critic_score)
+```
+
+The above analysis showed that the association between critic score and audience score remained relatively constant until 2020. After 2020, however, this association weakened. One theory why is a divergence between the general public and critics due to increasing societal distrust as discussed in the Introduction. Another possibility is that the COVID-19 pandemic brought about a massive shift in the movie industry, namely an increase in the number of films being released directly to streaming services rather than having a theatrical run. To determine whether this is the case, Figure 4 plots the association between audience score and critic score in the four years directly preceding the pandemic to the four years during and after the pandemic. By narrowing the time window it is easier to isolate any shift caused by COVID from a longer term trend.
+
+There is a clear difference in the association between critic score and audience score in these two time windows. While still roughly linear, the association in 2020-Present is noticeably weaker. The correlation in the 2016-2019 time period is $\rho_{2016-2019}$ = `r round(before_COVID_cor, 2)` and the correlation in the 2020-Present time period is $\rho_{2020-Present}$ = `r round(after_COVID_cor, 2)`. This provides preliminary evidence that the weakening after 2020 is due to changes in the movie industry brought on by the COVID pandemic, rather than a longer term trend.
+
+## Conclusion
+
+Using data from Rotten Tomatoes, this report explored the association between audience scores and critic scores for a large number of films (n = `r n`). The analysis resulted in the following three key findings:
+
+1.  The opinions of critics and the general public on movies has a moderately strong linear relationship.
+
+2.  This relationship did not meaningfully change over time until 2020.
+
+3.  After 2020 the relationship between critic scores and public scores weakened
+
+Critics enjoy a powerful position in society, as arbiters of quality in movies. For decades, their opinions have largely aligned with the general public. But all "Golden Ages" must come to an end. The COVID-19 pandemic resulted in massive ramifications for the film industry. Coupled with an increase in general societal distrust, perhaps one unacknowledged change is an end to the "Golden Age" of critics.
+
+## GitHub Link
+
+<https://github.com/ethanphilipweiland/rotten-tomatoes>
+
+## Appendix
+
+```{r, echo=FALSE}
+ggplot(data.frame(residuals=residuals(model1),
+                  fitted=fitted.values(model1)),
+       aes(x=fitted, y=residuals)) +
+  geom_point(alpha=0.3) +
+  stat_smooth(method="loess", formula="y~x", se=F) +
+  labs(title="Figure A1. Model 1 Residuals vs. Fitted Values",
+       y="Residuals",
+       x="Fitted Values")
+```
+
+```{r, echo=FALSE}
+ggplot(data.frame(residuals_sq=residuals(model1)^2,
+                  fitted=fitted.values(model1)),
+       aes(x=fitted, y=residuals_sq)) +
+  geom_point(alpha=0.3) +
+  stat_smooth(method="loess", formula="y~x", se=F) +
+  labs(title="Figure A2. Model 1 Residuals Squared vs. Fitted Values",
+       y="Residuals Squared",
+       x="Fitted Values")
+```
+
+```{r, echo=FALSE}
+qqnorm(residuals(model1), main="Figure A3. Normality of Model 1 Residuals")
+qqline(residuals(model1))
+```
